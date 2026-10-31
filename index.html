@@ -54,14 +54,16 @@ td.bad{background:var(--warnbg)}
     <button class="primary" id="openCam">📷 Use camera</button>
     <label class="file">🖼️ Upload / paste (pic, PDF)<input id="up" type="file" accept="image/*,application/pdf,.pdf" multiple></label>
     <select id="engine">
-      <option value="tess">Libre (Tesseract)</option>
+      <option value="tess">Libre (Tesseract) - mahina sa sulat-kamay</option>
+      <option value="gemini">Gemini (libreng API key)</option>
       <option value="claude">Claude (API key)</option>
     </select>
     <label class="file">📋 Listahan ng clients<input id="names" type="file" accept=".txt,.csv"></label>
+    <button id="addText">📝 Paste text</button>
     <span class="mute" id="namesInfo"></span>
   </div>
-  <details id="claudeBox" style="display:none;margin-top:8px"><summary class="mute">Claude API key</summary>
-    <div class="row" style="margin-top:6px"><input id="key" type="password" placeholder="sk-ant-..." style="flex:1;min-width:200px"><span class="mute">Sa phone mo lang naka-save.</span></div>
+  <details id="claudeBox" style="display:none;margin-top:8px" open><summary class="mute" id="keyLabel">API key</summary>
+    <div class="row" style="margin-top:6px"><input id="key" type="password" placeholder="API key" style="flex:1;min-width:200px"><input id="gmodel" type="text" value="gemini-2.5-flash" style="width:170px;display:none;font:inherit;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)" aria-label="Gemini model"><span class="mute">Sa phone mo lang naka-save.</span></div>
   </details>
   <div id="strip"></div>
   <div class="status" id="status"></div>
@@ -179,37 +181,53 @@ function snapName(name){
   const lim=Math.max(1,Math.floor(Math.min(name.length,best?best.length:0)/4));
   return best&&bd<=lim?best:name;
 }
+const PAY=/\b(g\s?cash|gcash|cash|card|maya|paid|bank|transfer)\b/gi;
+const WEEKDAY=/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi;
+/* Sheet layout: date header, then a "time + client" line, then one line per therapist
+   (therapist, hours, payment, amount). The client is carried over to its therapist lines. */
 function parseText(text){
-  const entries=[]; let cur="";
+  const entries=[]; let cur="", client="", used=true;
+  const flush=()=>{ if(client&&!used) entries.push({date:cur,client,therapist:"",service:"BM",hours:""}); };
   text.split(/\r?\n/).forEach(raw=>{
-    let line=raw.replace(/[|_]+/g," ").trim();
+    let line=raw.replace(/[|_"“”]+/g," ").trim();
     if(!line) return;
     const dt=findDate(line);
-    if(dt){ cur=dt.iso; line=line.replace(dt.text," ").trim(); }
+    if(dt){ flush(); cur=dt.iso; client=""; used=true; line=line.replace(dt.text," "); }
+    line=line.replace(WEEKDAY," ")
+      .replace(/^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)(?![a-z])\s*/i,"")   // 3pm
+      .replace(/^\s*\d{3,4}\s+(?=[A-Za-z])/,"")                                          // 730
+      .replace(PAY," ").trim();
     let hs=false;
     line=line.replace(/\b(hot\s*stone|h\.?\s?s\.?)(?![a-z])/gi,()=>{hs=true;return " "});
-    let ther=null,therTok=null;
-    const toks=line.split(/[\s,;:()\/\-]+/).filter(Boolean);
-    for(const t of toks){ const e=THERAPISTS.find(n=>n.toLowerCase()===t.toLowerCase()); if(e){ther=e;therTok=t;break} }
-    if(!ther) for(let i=0;i<toks.length;i++){
-      const t=toks[i];
-      if(!/^[A-Za-z]{3,}$/.test(t)||/^(delos|del|lee)$/i.test(t)) continue;
-      // "Dela" alone = Delia; "dela Cruz" (followed by a word) = surname
-      if(/^dela$/i.test(t)&&/^[A-Za-z]{2,}$/.test(toks[i+1]||"")) continue;
-      const m=/^dela$/i.test(t)?"Delia":matchTherapist(t);
-      if(m){ther=m;therTok=t;break}
-    }
     let hours="";
     const hm=line.match(/(?:^|[\s(])(\d(?:[.,]\d)?)(?=$|[\s),;]|hrs?|h\b)/i);
     if(hm) hours=normHours(hm[1]);
+    let ther=null,therTok=null;
+    const toks=line.split(/[\s,;:()\/\-]+/).filter(Boolean);
+    for(const t of toks){ const e=THERAPISTS.find(n=>n.toLowerCase()===t.toLowerCase()); if(e){ther=e;therTok=t;break} }
+    // fuzzy (handwriting) only on lines that have hours, so a client like "Molly" is not turned into Dolly
+    if(!ther&&hours!=="") for(let i=0;i<toks.length;i++){
+      const t=toks[i];
+      if(!/^[A-Za-z]{3,}$/.test(t)||/^(delos|del|lee)$/i.test(t)) continue;
+      if(/^dela$/i.test(t)&&/^[A-Za-z]{2,}$/.test(toks[i+1]||"")) continue;   // "dela Cruz" = surname
+      const m=/^dela$/i.test(t)?"Delia":matchTherapist(t);
+      if(m){ther=m;therTok=t;break}
+    }
     let rest=line;
     if(therTok) rest=rest.replace(new RegExp("\\b"+therTok+"\\b"),"  ");
     if(hm) rest=rest.replace(hm[1]," ");
     rest=rest.replace(/\b(hrs?|hours?)\b/gi," ").replace(/[^A-Za-zÀ-ɏ.'\- ]+/g," ").replace(/\s+/g," ").trim().replace(/^[-.' ]+|[-.' ]+$/g,"");
-    const client=rest?snapName(titleCase(rest)):"";
-    if(!ther&&hours===""&&!client) return;       // date-only header line
-    entries.push({date:cur,client,therapist:ther||"",service:hs?"Hotstone":"BM",hours});
+    const name=rest?snapName(titleCase(rest)):"";
+    if(!ther&&hours===""){                 // a client line (or a date/weekday-only line)
+      if(!name) return;
+      flush(); client=name; used=false; return;
+    }
+    let c=client;
+    if(name){ flush(); client=c=name; }    // one-line format: "Maria Santos Lucy 1.5 HS"
+    entries.push({date:cur,client:c,therapist:ther||"",service:hs?"Hotstone":"BM",hours});
+    used=true;
   });
+  flush();
   return entries;
 }
 
@@ -265,10 +283,10 @@ async function copy(id,btn){
 function renderStrip(){
   const s=$("strip"); s.innerHTML="";
   photos.forEach((p,i)=>{
-    if(!p.url) p.url=URL.createObjectURL(p.blob);
+    if(!p.url&&p.blob) p.url=URL.createObjectURL(p.blob);
     const d=document.createElement("div"); d.className="th"+(p.id===selId?" sel":"");
-    d.innerHTML='<img alt=""><span class="b"></span>';
-    d.querySelector("img").src=p.url;
+    d.innerHTML=(p.blob?'<img alt="">':'<div style="display:flex;height:100%;align-items:center;justify-content:center;font-size:26px">📝</div>')+'<span class="b"></span>';
+    if(p.blob) d.querySelector("img").src=p.url;
     d.querySelector(".b").textContent=(i+1)+" "+({queued:"⏳",reading:"🔍",done:"✓",error:"⚠"}[p.status]||"");
     d.onclick=()=>select(p.id);
     s.appendChild(d);
@@ -305,7 +323,7 @@ async function pump(){
   if(!photos.some(p=>p.status==="error")) setStatus("Tapos na. I-check ang table.");
 }
 async function readImage(blob){
-  return $("engine").value==="claude"?readClaude(blob):readTess(blob);
+  const e=$("engine").value; return e==="claude"?readClaude(blob):e==="gemini"?readGemini(blob):readTess(blob);
 }
 async function readTess(blob){
   if(!window.Tesseract) throw new Error("Hindi na-load ang Tesseract (kailangan ng internet sa unang gamit).");
@@ -325,22 +343,39 @@ function toBase64(blob){
     img.onerror=no; img.src=url;
   });
 }
+const OCR_PROMPT="Transcribe this handwritten sales sheet exactly as written, keeping every line break and the order. Layout: a date header at the top, then for each client a line with the time and the client name, followed by one indented line per therapist (therapist name, hours like 1hr or 1.5, payment like Cash or GCash, amount). Therapist names can only be: "+THERAPISTS.join(", ")+". Output plain text only, no commentary.";
+function keyStore(){ return $("engine").value==="gemini"?"tst_gkey":"tst_key"; }
 async function readClaude(blob){
   const key=$("key").value.trim();
   if(!key) throw new Error("Ilagay muna ang Claude API key.");
-  store.set("tst_key",key);
   const data=await toBase64(blob);
   const r=await fetch("https://api.anthropic.com/v1/messages",{
     method:"POST",
     headers:{"content-type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
     body:JSON.stringify({model:"claude-sonnet-5-5",max_tokens:1500,messages:[{role:"user",content:[
       {type:"image",source:{type:"base64",media_type:"image/jpeg",data}},
-      {type:"text",text:"Transcribe this handwritten sales sheet exactly, one entry per line, keeping the order: date (if shown), client name, therapist name, hours, and any note like HS / H.S. / hotstone. Therapist names can only be: "+THERAPISTS.join(", ")+". Output plain text only, no commentary."}
+      {type:"text",text:OCR_PROMPT}
     ]}]})
   });
   const j=await r.json();
   if(!r.ok) throw new Error((j.error&&j.error.message)||("Error "+r.status));
   return j.content.map(c=>c.text||"").join("");
+}
+async function readGemini(blob){
+  const key=$("key").value.trim();
+  if(!key) throw new Error("Ilagay muna ang Gemini API key (aistudio.google.com).");
+  const model=($("gmodel").value.trim()||"gemini-2.5-flash");
+  const data=await toBase64(blob);
+  const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent?key="+encodeURIComponent(key),{
+    method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({contents:[{parts:[{inline_data:{mime_type:"image/jpeg",data}},{text:OCR_PROMPT}]}]})
+  });
+  const j=await r.json();
+  if(!r.ok) throw new Error((j.error&&j.error.message)||("Error "+r.status));
+  const parts=(j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts)||[];
+  const t=parts.map(x=>x.text||"").join("");
+  if(!t) throw new Error("Walang sagot ang Gemini.");
+  return t;
 }
 
 /* ---------- files: images and PDFs (each PDF page becomes one picture) ---------- */
@@ -433,7 +468,20 @@ $("clearAll").onclick=()=>{
 };
 $("copy1").onclick=e=>copy("t1",e.target);
 $("copy2").onclick=e=>copy("t2",e.target);
-$("engine").onchange=()=>{ $("claudeBox").style.display=$("engine").value==="claude"?"block":"none"; store.set("tst_engine",$("engine").value); };
+$("engine").onchange=()=>{
+  const e=$("engine").value;
+  $("claudeBox").style.display=e==="tess"?"none":"block";
+  $("gmodel").style.display=e==="gemini"?"block":"none";
+  $("keyLabel").textContent=e==="gemini"?"Gemini API key":"Claude API key";
+  $("key").value=store.get(keyStore())||"";
+  store.set("tst_engine",e);
+};
+$("key").oninput=()=>store.set(keyStore(),$("key").value.trim());
+$("gmodel").onchange=()=>store.set("tst_gmodel",$("gmodel").value.trim());
+$("addText").onclick=()=>{
+  const p={id:Date.now()+"-"+Math.random().toString(36).slice(2,7),blob:null,text:"",entries:[],status:"done"};
+  photos.push(p); DB.put(p); select(p.id); $("raw").focus();
+};
 $("names").onchange=async e=>{
   const f=e.target.files[0]; if(!f) return;
   knownNames=(await f.text()).split(/\r?\n|,/).map(s=>s.trim()).filter(Boolean);
@@ -442,7 +490,7 @@ $("names").onchange=async e=>{
   photos.forEach(p=>{ if(p.text){p.entries=parseText(p.text);DB.put(p)} }); render();
 };
 (async function init(){
-  const k=store.get("tst_key"); if(k) $("key").value=k;
+  const gm=store.get("tst_gmodel"); if(gm) $("gmodel").value=gm;
   const en=store.get("tst_engine"); if(en){ $("engine").value=en; $("engine").onchange(); }
   try{ const n=JSON.parse(store.get("tst_names")||"[]"); if(n.length){knownNames=n; $("namesInfo").textContent=n.length+" names";} }catch(e){}
   if(await DB.open()){
