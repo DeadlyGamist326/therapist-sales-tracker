@@ -52,7 +52,7 @@ td.bad{background:var(--warnbg)}
 <div class="card">
   <div class="row">
     <button class="primary" id="openCam">📷 Use camera</button>
-    <label class="file">🖼️ Upload pics<input id="up" type="file" accept="image/*" multiple></label>
+    <label class="file">🖼️ Upload / paste (pic, PDF)<input id="up" type="file" accept="image/*,application/pdf,.pdf" multiple></label>
     <select id="engine">
       <option value="tess">Libre (Tesseract)</option>
       <option value="claude">Claude (API key)</option>
@@ -101,6 +101,7 @@ td.bad{background:var(--warnbg)}
 <input id="fallbackCam" type="file" accept="image/*" capture="environment" style="display:none">
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 const THERAPISTS = ["Lucy","Lea","Dolly","Merly","Mitch","Delia"];
 const YEAR = 2026;
@@ -342,6 +343,34 @@ async function readClaude(blob){
   return j.content.map(c=>c.text||"").join("");
 }
 
+/* ---------- files: images and PDFs (each PDF page becomes one picture) ---------- */
+const MAX_PDF_PAGES=40;
+function isPdf(f){ return f.type==="application/pdf"||/\.pdf$/i.test(f.name||""); }
+async function addFiles(list){
+  for(const f of [...list]){
+    if(isPdf(f)){ try{ await addPdf(f); }catch(e){ setStatus("PDF error: "+e.message); } }
+    else if((f.type||"").startsWith("image/")||/\.(png|jpe?g|webp|heic)$/i.test(f.name||"")) addPhoto(f);
+    else setStatus("Hindi suportado: "+(f.name||f.type)+" (png, jpeg o pdf lang).");
+  }
+}
+async function addPdf(file){
+  if(!window.pdfjsLib) throw new Error("Hindi na-load ang PDF reader (kailangan ng internet).");
+  pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;
+  const n=Math.min(pdf.numPages,MAX_PDF_PAGES);
+  for(let i=1;i<=n;i++){
+    setStatus("PDF: page "+i+" / "+n+"...");
+    const page=await pdf.getPage(i);
+    const base=page.getViewport({scale:1});
+    const vp=page.getViewport({scale:Math.min(3,2200/Math.max(base.width,base.height))});
+    const c=document.createElement("canvas"); c.width=Math.round(vp.width); c.height=Math.round(vp.height);
+    await page.render({canvasContext:c.getContext("2d"),viewport:vp}).promise;
+    const blob=await new Promise(r=>c.toBlob(r,"image/jpeg",0.92));
+    if(blob) addPhoto(blob);
+  }
+  if(pdf.numPages>n) setStatus("Unang "+n+" pages lang ng PDF ang kinuha ("+pdf.numPages+" total).");
+}
+
 /* ---------- camera (stays open for continuous shots) ---------- */
 let stream=null, shots=0;
 async function openCamera(){
@@ -372,8 +401,21 @@ function shoot(){
 $("openCam").onclick=openCamera;
 $("shutter").onclick=shoot;
 $("camDone").onclick=closeCamera;
-$("fallbackCam").onchange=e=>{ [...e.target.files].forEach(addPhoto); e.target.value=""; };
-$("up").onchange=e=>{ [...e.target.files].forEach(addPhoto); e.target.value=""; };
+$("fallbackCam").onchange=e=>{ addFiles(e.target.files); e.target.value=""; };
+$("up").onchange=e=>{ addFiles(e.target.files); e.target.value=""; };
+/* Ctrl+V paste and drag-and-drop of png / jpeg / pdf */
+document.addEventListener("paste",e=>{
+  const cd=e.clipboardData; if(!cd) return;
+  let files=[...(cd.files||[])];
+  if(!files.length) files=[...(cd.items||[])].filter(i=>i.kind==="file").map(i=>i.getAsFile()).filter(Boolean);
+  if(!files.length) return;           // plain text paste (e.g. into the text box) works as usual
+  e.preventDefault(); addFiles(files);
+});
+document.addEventListener("dragover",e=>{ if(e.dataTransfer&&[...e.dataTransfer.types].includes("Files")) e.preventDefault(); });
+document.addEventListener("drop",e=>{
+  if(!e.dataTransfer||!e.dataTransfer.files.length) return;
+  e.preventDefault(); addFiles(e.dataTransfer.files);
+});
 $("parse").onclick=()=>{
   const p=photos.find(x=>x.id===selId); if(!p) return;
   p.text=$("raw").value; p.entries=parseText(p.text); p.status="done"; DB.put(p); renderStrip(); render();
