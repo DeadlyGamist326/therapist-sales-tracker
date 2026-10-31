@@ -63,7 +63,7 @@ td.bad{background:var(--warnbg)}
     <span class="mute" id="namesInfo"></span>
   </div>
   <details id="claudeBox" style="display:none;margin-top:8px" open><summary class="mute" id="keyLabel">API key</summary>
-    <div class="row" style="margin-top:6px"><input id="key" type="password" placeholder="API key" style="flex:1;min-width:200px"><input id="gmodel" type="text" value="gemini-2.5-flash" style="width:170px;display:none;font:inherit;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)" aria-label="Gemini model"><span class="mute">Sa phone mo lang naka-save.</span></div>
+    <div class="row" style="margin-top:6px"><input id="key" type="password" placeholder="API key" style="flex:1;min-width:200px"><input id="gmodel" type="text" value="gemini-3.8-flash" style="width:170px;display:none;font:inherit;padding:9px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)" aria-label="Gemini model"><span class="mute">Sa phone mo lang naka-save.</span></div>
   </details>
   <div id="strip"></div>
   <div class="status" id="status"></div>
@@ -364,7 +364,7 @@ async function readClaude(blob){
 async function readGemini(blob){
   const key=$("key").value.trim();
   if(!key) throw new Error("Ilagay muna ang Gemini API key (aistudio.google.com).");
-  const model=($("gmodel").value.trim()||"gemini-2.5-flash");
+  const model=($("gmodel").value.trim()||"gemini-3.8-flash");
   const data=await toBase64(blob);
   const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent?key="+encodeURIComponent(key),{
     method:"POST",headers:{"content-type":"application/json"},
@@ -490,7 +490,7 @@ $("names").onchange=async e=>{
   photos.forEach(p=>{ if(p.text){p.entries=parseText(p.text);DB.put(p)} }); render();
 };
 (async function init(){
-  const gm=store.get("tst_gmodel"); if(gm) $("gmodel").value=gm;
+  const gm=store.get("tst_gmodel"); if(gm&&gm!=="gemini-2.5-flash") $("gmodel").value=gm;
   const en=store.get("tst_engine"); if(en){ $("engine").value=en; $("engine").onchange(); }
   try{ const n=JSON.parse(store.get("tst_names")||"[]"); if(n.length){knownNames=n; $("namesInfo").textContent=n.length+" names";} }catch(e){}
   if(await DB.open()){
