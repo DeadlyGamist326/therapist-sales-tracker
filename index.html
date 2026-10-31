@@ -190,8 +190,13 @@ function parseText(text){
     let ther=null,therTok=null;
     const toks=line.split(/[\s,;:()\/\-]+/).filter(Boolean);
     for(const t of toks){ const e=THERAPISTS.find(n=>n.toLowerCase()===t.toLowerCase()); if(e){ther=e;therTok=t;break} }
-    if(!ther) for(const t of toks){
-      if(/^[A-Za-z]{3,}$/.test(t)&&!/^(dela|delos|del|lee)$/i.test(t)){ const m=matchTherapist(t); if(m){ther=m;therTok=t;break} }
+    if(!ther) for(let i=0;i<toks.length;i++){
+      const t=toks[i];
+      if(!/^[A-Za-z]{3,}$/.test(t)||/^(delos|del|lee)$/i.test(t)) continue;
+      // "Dela" alone = Delia; "dela Cruz" (followed by a word) = surname
+      if(/^dela$/i.test(t)&&/^[A-Za-z]{2,}$/.test(toks[i+1]||"")) continue;
+      const m=/^dela$/i.test(t)?"Delia":matchTherapist(t);
+      if(m){ther=m;therTok=t;break}
     }
     let hours="";
     const hm=line.match(/(?:^|[\s(])(\d(?:[.,]\d)?)(?=$|[\s),;]|hrs?|h\b)/i);
