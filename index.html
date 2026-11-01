@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Therapist Sales Tracker</title>
 <style>
-:root{--bg:#f6f7f9;--card:#fff;--ink:#1d2330;--mute:#667085;--line:#d9dde5;--acc:#2f6fed;--warn:#b54708;--warnbg:#fff1e0;--redbg:#fde4e4;--red:#c0262d;--hlbg:#fff3a3}
-@media (prefers-color-scheme:dark){:root{--bg:#12151b;--card:#1b2029;--ink:#e8ebf1;--mute:#98a2b3;--line:#2c3340;--acc:#6b9bff;--warn:#f5a44b;--warnbg:#3a2b17;--redbg:#3d1d1d;--red:#ff8a8a;--hlbg:#4a4217}}
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1d2330;--mute:#667085;--line:#d9dde5;--acc:#2f6fed;--warn:#b54708;--warnbg:#fff1e0;--redbg:#fde4e4;--red:#c0262d;--hlbg:#fff3a3;--newbg:#dbeafe}
+@media (prefers-color-scheme:dark){:root{--bg:#12151b;--card:#1b2029;--ink:#e8ebf1;--mute:#98a2b3;--line:#2c3340;--acc:#6b9bff;--warn:#f5a44b;--warnbg:#3a2b17;--redbg:#3d1d1d;--red:#ff8a8a;--hlbg:#4a4217;--newbg:#1c2a45}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 main{max-width:900px;margin:0 auto;padding:16px}
@@ -37,6 +37,7 @@ td[contenteditable]:focus{outline:2px solid var(--acc)}
 td.bad{background:var(--warnbg)}
 tr.q td{background:var(--redbg)}
 tr.hl td{background:var(--hlbg)}
+tr td.nw{background:var(--newbg)}
 tr.sel td{box-shadow:inset 0 2px 0 var(--acc),inset 0 -2px 0 var(--acc)}
 td.ix{width:34px;text-align:center;cursor:pointer;user-select:none;color:var(--mute);font-size:12px}
 td.note{color:var(--red);font-size:12.5px;min-width:150px}
@@ -63,7 +64,7 @@ td.note{color:var(--red);font-size:12.5px;min-width:150px}
       <option value="gemini">Gemini (libreng API key)</option>
       <option value="claude">Claude (API key)</option>
     </select>
-    <label class="file">📋 Listahan ng clients<input id="names" type="file" accept=".txt,.csv"></label>
+    <label class="file">📋 Listahan ng clients<input id="names" type="file" accept=".xlsx,.xls,.txt,.csv"></label>
     <button id="addText">📝 Paste text</button>
     <span class="mute" id="namesInfo"></span>
   </div>
@@ -89,13 +90,13 @@ td.note{color:var(--red);font-size:12.5px;min-width:150px}
     <button id="hlBtn" disabled>🖍 Highlight</button><button id="delBtn" class="danger" disabled>🗑 Delete</button>
     <span class="mute" id="selInfo"></span>
   </div>
-  <div class="mute" style="margin-top:6px">Pindutin ang # ng row para pumili (Shift = range). Delete / Backspace = burahin, Ctrl+Z = undo, Ctrl+Y = redo. Pula = may tanong. Rate: BM ₱400/hr; Hotstone 1.5 hrs ₱800, 2 hrs ₱1000 lang. Ang ₱ at Note ay hindi kasama sa Copy.</div>
+  <div class="mute" style="margin-top:6px">Pindutin ang # ng row para pumili (Shift = range). Delete / Backspace = burahin, Ctrl+Z = undo, Ctrl+Y = redo. Pula = may tanong. Asul = bagong client (wala sa listahan). Rate: BM ₱400/hr; Hotstone 1.5 hrs ₱800, 2 hrs ₱1000 lang. Ang ₱ at Note ay hindi kasama sa Copy.</div>
 </div>
 
 <div class="tables">
   <div class="card">
     <h2>Clients <button id="copy1">Copy</button></h2>
-    <div class="wrap"><table id="t1"><thead><tr><th class="nc">#</th><th>Date</th><th>Client</th></tr></thead><tbody></tbody></table></div>
+    <div class="wrap"><table id="t1"><thead><tr><th class="nc">#</th><th>Date</th><th>Relationship / bago</th><th>Name</th></tr></thead><tbody></tbody></table></div>
   </div>
   <div class="card">
     <h2>Therapist <button id="copy2">Copy</button></h2>
@@ -118,11 +119,11 @@ td.note{color:var(--red);font-size:12.5px;min-width:150px}
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 const THERAPISTS = ["Lucy","Lea","Dolly","Merly","Mitch","Delia"];
 const YEAR = 2026;
 const $ = id => document.getElementById(id);
-let knownNames = [];
 let photos = [];          // {id, blob, text, entries, status, url}
 let selId = null;
 const store = {
@@ -188,25 +189,61 @@ function normHours(s){
   return String(Math.max(1,Math.round(n*2)/2));
 }
 function titleCase(s){ return s.replace(/\w\S*/g,w=>w[0].toUpperCase()+w.slice(1).toLowerCase()); }
-function snapName(name){
-  if(!knownNames.length||!name) return name;
-  let best=null,bd=99;
-  for(const k of knownNames){ const d=lev(name,k); if(d<bd){bd=d;best=k} }
-  const lim=Math.max(1,Math.floor(Math.min(name.length,best?best.length:0)/4));
-  return best&&bd<=lim?best:name;
+/* ---------- names list (spelling check + relationships) ---------- */
+let LIST=[];   // {name, norm, src}  src 1 = this year, 2 = all years
+const REL=/\b(son|daughter|sister|brother|kapatid|husband|wife|mother|father|cousin|pinsan|friend|anak|asawa|mama|papa|mommy|daddy|tita|tito|lola|lolo|nanay|tatay|kuya|ate|nephew|niece|pamangkin|apo|girlfriend|boyfriend|colleague|officemate|neighbor|kapitbahay|yaya|driver)\b/gi;
+function norm(s){ return String(s).toLowerCase().replace(/\(.*?\)/g," ").replace(/[^a-z0-9À-ɏ]+/g," ").replace(/\s+/g," ").trim(); }
+function setList(items){            // items: [[name, src], ...]
+  const seen=new Map();
+  items.forEach(([name,src])=>{
+    const n=norm(name); if(!n) return;
+    const old=seen.get(n);
+    if(!old||src<old.src) seen.set(n,{name:String(name).trim(),norm:n,src});
+  });
+  LIST=[...seen.values()];
+  store.set("tst_list",JSON.stringify(LIST.map(e=>[e.name,e.src])));
+  $("namesInfo").textContent=LIST.length+" names";
+}
+function matchName(t){
+  if(!LIST.length) return {name:titleCase(t),isNew:false};   // no list loaded: nothing to compare with
+  const n=norm(t); if(!n) return {name:titleCase(t),isNew:true};
+  let best=null,bd=1e9;
+  for(const e of LIST){
+    const d=lev(n,e.norm);
+    if(d<bd||(d===bd&&e.src<best.src)){bd=d;best=e}
+  }
+  const lim=Math.min(3,Math.floor(Math.max(n.length,best.norm.length)*0.2));
+  if(bd<=lim) return {name:best.name,isNew:false};
+  if(!n.includes(" ")){                                      // first name only, if exactly one in the list has it
+    const c=LIST.filter(e=>e.norm.split(" ")[0]===n);
+    if(c.length===1) return {name:c[0].name,isNew:false};
+  }
+  return {name:titleCase(t),isNew:true};
+}
+// text of a client line -> {client (validated spelling), rel (Son, Sister...), isNew}
+function classify(raw){
+  let t=String(raw).replace(/[()]/g," "), rel="";
+  t=t.replace(REL,m=>{ if(!rel) rel=titleCase(m); return " "; });
+  if(rel) t=t.replace(/\b(of|ni|ng|nila)\b/gi," ").replace(/['’]s\b/gi," ");
+  t=t.replace(/\s+/g," ").trim().replace(/^[-.' ]+|[-.' ]+$/g,"");
+  if(!t&&!rel) return null;
+  if(!t) return {client:"",rel,isNew:false};
+  const m=matchName(t);
+  return {client:m.name,rel,isNew:m.isNew};
 }
 const PAY=/\b(g\s?cash|gcash|cash|card|maya|paid|bank|transfer)\b/gi;
 const WEEKDAY=/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi;
 /* Sheet layout: date header, then a "time + client" line, then one line per therapist
    (therapist, hours, payment, amount). The client is carried over to its therapist lines. */
 function parseText(text){
-  const entries=[]; let cur="", client="", used=true;
-  const flush=()=>{ if(client&&!used) entries.push({date:cur,client,therapist:"",service:"BM",hours:"",amount:""}); };
+  const entries=[]; let cur="", cl=null, used=true;
+  const mk=(c,extra)=>({date:cur,client:c?c.client:"",rel:c?c.rel:"",isNew:c?!!c.isNew:false,therapist:"",service:"BM",hours:"",amount:"",...extra});
+  const flush=()=>{ if(cl&&!used) entries.push(mk(cl)); };
   text.split(/\r?\n/).forEach(raw=>{
     let line=raw.replace(/[|_"“”]+/g," ").trim();
     if(!line) return;
     const dt=findDate(line);
-    if(dt){ flush(); cur=dt.iso; client=""; used=true; line=line.replace(dt.text," "); }
+    if(dt){ flush(); cur=dt.iso; cl=null; used=true; line=line.replace(dt.text," "); }
     line=line.replace(WEEKDAY," ")
       .replace(/^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm|a\.m\.|p\.m\.)(?![a-z])\s*/i,"")   // 3pm
       .replace(/^\s*\d{3,4}\s+(?=[A-Za-z])/,"")                                          // 730
@@ -218,7 +255,7 @@ function parseText(text){
     if(hm) hours=normHours(hm[1]);
     const rawHours=hm?hm[1].replace(",","."):"";
     let amount="";
-    const am=(hm?line.replace(hm[0]," "):line).match(/(?:^|[\s\u20b1])(\d{1,3}(?:,\d{3})+|\d{2,5})(?=$|[\s.,)])/);
+    const am=(hm?line.replace(hm[0]," "):line).match(/(?:^|[\s₱])(\d{1,3}(?:,\d{3})+|\d{2,5})(?=$|[\s.,)])/);
     if(am) amount=am[1].replace(/,/g,"");
     let ther=null,therTok=null;
     const toks=line.split(/[\s,;:()\/\-]+/).filter(Boolean);
@@ -231,18 +268,24 @@ function parseText(text){
       const m=/^dela$/i.test(t)?"Delia":matchTherapist(t);
       if(m){ther=m;therTok=t;break}
     }
+    const clientLine=!ther&&hours==="";
     let rest=line;
     if(therTok) rest=rest.replace(new RegExp("\\b"+therTok+"\\b"),"  ");
     if(hm) rest=rest.replace(hm[1]," ");
-    rest=rest.replace(/\b(hrs?|hours?)\b/gi," ").replace(/[^A-Za-zÀ-ɏ.'\- ]+/g," ").replace(/\s+/g," ").trim().replace(/^[-.' ]+|[-.' ]+$/g,"");
-    const name=rest?snapName(titleCase(rest)):"";
-    if(!ther&&hours===""){                 // a client line (or a date/weekday-only line)
-      if(!name) return;
-      flush(); client=name; used=false; return;
+    rest=rest.replace(/\b(hrs?|hours?)\b/gi," ");
+    // a client line keeps digits and & (room numbers, "Emerson & Ces"); a therapist line drops amounts
+    rest=(clientLine?rest.replace(/[^A-Za-z0-9À-ɏ.'&\/\- ]+/g," "):rest.replace(/[^A-Za-zÀ-ɏ.'&\- ]+/g," "))
+        .replace(/\s+/g," ").trim().replace(/^[-.' ]+|[-.' ]+$/g,"");
+    const cn=rest?classify(rest):null;
+    if(clientLine){
+      if(!cn) return;                                    // date/weekday-only line
+      if(!cn.client&&cn.rel&&cl){ cl={...cl,rel:cn.rel}; return; }   // "Son" on its own line after the client
+      flush(); cl=cn; used=false; return;
     }
-    let c=client;
-    if(name){ flush(); client=c=name; }    // one-line format: "Maria Santos Lucy 1.5 HS"
-    entries.push({date:cur,client:c,therapist:ther||"",service:hs?"Hotstone":"BM",hours,amount,rawHours});
+    let c=cl;
+    if(cn&&cn.client){ flush(); cl=c=cn; }               // one-line format: "Maria Santos Lucy 1.5 HS"
+    else if(cn&&cn.rel&&c) c={...c,rel:cn.rel};
+    entries.push(mk(c,{therapist:ther||"",service:hs?"Hotstone":"BM",hours,amount,rawHours}));
     used=true;
   });
   flush();
@@ -346,7 +389,18 @@ function render(){
       const d=findDate(val), iso=d?d.iso:(val===""?"":e.date);
       if(iso!==e.date){ e.date=iso; DB.put(p); render(); }
     });
-    cell(t1,e.client,"",val=>{ e.client=val; DB.put(p); refresh(v); });
+    // column 2: relationship, or the written name when the client is not in the list ("Name Son" if both)
+    // column 3: the name with the spelling from the list
+    const col2=e.isNew?[e.client,e.rel].filter(Boolean).join(" "):(e.rel||"");
+    cell(t1,col2,e.isNew?"nw":"",(val,done)=>{
+      if(e.isNew) e.client=val, e.rel=""; else e.rel=val;
+      DB.put(p); if(done&&val==="" ) render(); refresh(v);
+    });
+    cell(t1,e.isNew?"":e.client,"",(val,done)=>{
+      e.client=val;
+      if(done){ const m=LIST.length&&val?matchName(val):null; const nw=m?m.isNew:false; if(nw!==e.isNew){ e.isNew=nw; DB.put(p); render(); return; } }
+      DB.put(p); refresh(v);
+    });
     cell(t2,e.therapist,"",val=>{ e.therapist=val; DB.put(p); refresh(v); });
     cell(t2,e.service,"",val=>{ e.service=val; DB.put(p); refresh(v); });
     cell(t2,e.hours,"",val=>{ e.hours=val; delete e.rawHours; DB.put(p); refresh(v); });
@@ -612,15 +666,31 @@ $("addText").onclick=()=>{
 };
 $("names").onchange=async e=>{
   const f=e.target.files[0]; if(!f) return;
-  knownNames=(await f.text()).split(/\r?\n|,/).map(s=>s.trim()).filter(Boolean);
-  store.set("tst_names",JSON.stringify(knownNames));
-  $("namesInfo").textContent=knownNames.length+" names";
-  photos.forEach(p=>{ if(p.text){p.entries=parseText(p.text);DB.put(p)} }); render();
+  try{
+    let items=[];
+    if(/\.xlsx?$/i.test(f.name)){
+      if(!window.XLSX) throw new Error("Hindi na-load ang Excel reader (kailangan ng internet).");
+      const wb=XLSX.read(await f.arrayBuffer(),{type:"array"});
+      // names are in column B; first sheet = this year (src 1), later sheets = all years (src 2)
+      wb.SheetNames.forEach((sn,idx)=>{
+        const ws=wb.Sheets[sn], rg=XLSX.utils.decode_range(ws["!ref"]||"A1");
+        for(let r=rg.s.r;r<=rg.e.r;r++){
+          const c=ws[XLSX.utils.encode_cell({r,c:1})];
+          if(c&&c.v!=null&&String(c.v).trim()) items.push([String(c.v).trim(),idx===0?1:2]);
+        }
+      });
+    } else {
+      items=(await f.text()).split(/\r?\n|,/).map(x=>x.trim()).filter(Boolean).map(x=>[x,1]);
+    }
+    setList(items);
+    photos.forEach(p=>{ if(p.text){p.entries=parseText(p.text);p.rev=(p.rev||0)+1;DB.put(p)} }); render();
+  }catch(err){ setStatus("Error sa listahan: "+err.message); }
+  e.target.value="";
 };
 (async function init(){
   const gm=store.get("tst_gmodel"); if(gm&&gm!=="gemini-2.5-flash") $("gmodel").value=gm;
   const en=store.get("tst_engine"); if(en){ $("engine").value=en; $("engine").onchange(); }
-  try{ const n=JSON.parse(store.get("tst_names")||"[]"); if(n.length){knownNames=n; $("namesInfo").textContent=n.length+" names";} }catch(e){}
+  try{ const n=JSON.parse(store.get("tst_list")||"[]"); if(n.length) setList(n); }catch(e){}
   if(await DB.open()){
     photos=(await DB.all()).sort((a,b)=>a.id<b.id?-1:1);
     photos.forEach(p=>{ if(p.status==="reading"||p.status==="queued"){ p.status="queued"; queue.push(p.id); } });
