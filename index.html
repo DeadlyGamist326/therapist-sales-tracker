@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Therapist Sales Tracker</title>
 <style>
-:root{--bg:#f6f7f9;--card:#fff;--ink:#1d2330;--mute:#667085;--line:#d9dde5;--acc:#2f6fed;--warn:#b54708;--warnbg:#fff1e0}
-@media (prefers-color-scheme:dark){:root{--bg:#12151b;--card:#1b2029;--ink:#e8ebf1;--mute:#98a2b3;--line:#2c3340;--acc:#6b9bff;--warn:#f5a44b;--warnbg:#3a2b17}}
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1d2330;--mute:#667085;--line:#d9dde5;--acc:#2f6fed;--warn:#b54708;--warnbg:#fff1e0;--redbg:#fde4e4;--red:#c0262d;--hlbg:#fff3a3}
+@media (prefers-color-scheme:dark){:root{--bg:#12151b;--card:#1b2029;--ink:#e8ebf1;--mute:#98a2b3;--line:#2c3340;--acc:#6b9bff;--warn:#f5a44b;--warnbg:#3a2b17;--redbg:#3d1d1d;--red:#ff8a8a;--hlbg:#4a4217}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 main{max-width:900px;margin:0 auto;padding:16px}
@@ -27,7 +27,7 @@ label.file input{display:none}
 .th img{width:100%;height:100%;object-fit:cover}
 .th .b{position:absolute;right:2px;bottom:2px;background:rgba(0,0,0,.65);color:#fff;border-radius:6px;font-size:11px;padding:1px 5px}
 textarea{width:100%;min-height:100px;font:14px/1.4 ui-monospace,Menlo,monospace;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)}
-.tables{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
+.tables{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:10px;align-items:start}
 .tables h2{font-size:14px;margin:0 0 6px;display:flex;justify-content:space-between;align-items:center;gap:6px}
 .wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:14px}
@@ -35,6 +35,11 @@ td,th{border:1px solid var(--line);padding:0 6px;height:34px;white-space:nowrap}
 th{background:var(--bg);font-weight:600;text-align:left;font-size:12px}
 td[contenteditable]:focus{outline:2px solid var(--acc)}
 td.bad{background:var(--warnbg)}
+tr.q td{background:var(--redbg)}
+tr.hl td{background:var(--hlbg)}
+tr.sel td{box-shadow:inset 0 2px 0 var(--acc),inset 0 -2px 0 var(--acc)}
+td.ix{width:34px;text-align:center;cursor:pointer;user-select:none;color:var(--mute);font-size:12px}
+td.note{color:var(--red);font-size:12.5px;min-width:150px}
 /* camera overlay */
 #cam{position:fixed;inset:0;background:#000;z-index:10;display:none;flex-direction:column}
 #cam video{flex:1;min-height:0;width:100%;object-fit:contain;background:#000}
@@ -78,14 +83,23 @@ td.bad{background:var(--warnbg)}
   </div>
 </div>
 
+<div class="card">
+  <div class="row">
+    <button id="undoBtn" disabled>↩ Undo</button><button id="redoBtn" disabled>↪ Redo</button>
+    <button id="hlBtn" disabled>🖍 Highlight</button><button id="delBtn" class="danger" disabled>🗑 Delete</button>
+    <span class="mute" id="selInfo"></span>
+  </div>
+  <div class="mute" style="margin-top:6px">Pindutin ang # ng row para pumili (Shift = range). Delete / Backspace = burahin, Ctrl+Z = undo, Ctrl+Y = redo. Pula = may tanong. Rate: BM ₱400/hr; Hotstone 1.5 hrs ₱800, 2 hrs ₱1000 lang. Ang ₱ at Note ay hindi kasama sa Copy.</div>
+</div>
+
 <div class="tables">
   <div class="card">
     <h2>Clients <button id="copy1">Copy</button></h2>
-    <div class="wrap"><table id="t1"><thead><tr><th>Date</th><th>Client</th></tr></thead><tbody></tbody></table></div>
+    <div class="wrap"><table id="t1"><thead><tr><th class="nc">#</th><th>Date</th><th>Client</th></tr></thead><tbody></tbody></table></div>
   </div>
   <div class="card">
     <h2>Therapist <button id="copy2">Copy</button></h2>
-    <div class="wrap"><table id="t2"><thead><tr><th>Therapist</th><th>Service</th><th>Hrs</th></tr></thead><tbody></tbody></table></div>
+    <div class="wrap"><table id="t2"><thead><tr><th class="nc">#</th><th>Therapist</th><th>Service</th><th>Hrs</th><th class="nc">&#8369;</th><th class="nc">Note</th></tr></thead><tbody></tbody></table></div>
   </div>
 </div>
 <div class="row"><span class="mute" id="count"></span><button class="danger" id="clearAll" style="margin-left:auto">Burahin lahat</button></div>
@@ -187,7 +201,7 @@ const WEEKDAY=/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi
    (therapist, hours, payment, amount). The client is carried over to its therapist lines. */
 function parseText(text){
   const entries=[]; let cur="", client="", used=true;
-  const flush=()=>{ if(client&&!used) entries.push({date:cur,client,therapist:"",service:"BM",hours:""}); };
+  const flush=()=>{ if(client&&!used) entries.push({date:cur,client,therapist:"",service:"BM",hours:"",amount:""}); };
   text.split(/\r?\n/).forEach(raw=>{
     let line=raw.replace(/[|_"“”]+/g," ").trim();
     if(!line) return;
@@ -202,6 +216,10 @@ function parseText(text){
     let hours="";
     const hm=line.match(/(?:^|[\s(])(\d(?:[.,]\d)?)(?=$|[\s),;]|hrs?|h\b)/i);
     if(hm) hours=normHours(hm[1]);
+    const rawHours=hm?hm[1].replace(",","."):"";
+    let amount="";
+    const am=(hm?line.replace(hm[0]," "):line).match(/(?:^|[\s\u20b1])(\d{1,3}(?:,\d{3})+|\d{2,5})(?=$|[\s.,)])/);
+    if(am) amount=am[1].replace(/,/g,"");
     let ther=null,therTok=null;
     const toks=line.split(/[\s,;:()\/\-]+/).filter(Boolean);
     for(const t of toks){ const e=THERAPISTS.find(n=>n.toLowerCase()===t.toLowerCase()); if(e){ther=e;therTok=t;break} }
@@ -224,15 +242,41 @@ function parseText(text){
     }
     let c=client;
     if(name){ flush(); client=c=name; }    // one-line format: "Maria Santos Lucy 1.5 HS"
-    entries.push({date:cur,client:c,therapist:ther||"",service:hs?"Hotstone":"BM",hours});
+    entries.push({date:cur,client:c,therapist:ther||"",service:hs?"Hotstone":"BM",hours,amount,rawHours});
     used=true;
   });
   flush();
   return entries;
 }
 
-/* ---------- tables ---------- */
-let view=[]; // sorted entry refs
+/* ---------- rules / validation ---------- */
+const BM_RATE=400, HOT={1.5:800,2:1000};
+function isHot(e){ return /hot|^\s*h\.?\s?s\.?\s*$/i.test(e.service||""); }
+function expectedAmt(e){
+  const h=parseFloat(e.hours); if(isNaN(h)) return null;
+  if(isHot(e)) return HOT[h]!==undefined?HOT[h]:null;
+  return BM_RATE*h;
+}
+function validate(e){
+  const n=[];
+  if(!e.date) n.push("walang petsa");
+  if(!e.client) n.push("walang client");
+  if(!e.therapist) n.push("walang therapist");
+  const h=parseFloat(e.hours);
+  if(e.hours===""||e.hours==null||isNaN(h)) n.push("walang oras");
+  else {
+    if(e.rawHours&&parseFloat(e.rawHours)!==h) n.push("oras na nabasa "+e.rawHours+" ni-round sa "+h);
+    if(isHot(e)&&HOT[h]===undefined) n.push("Hotstone: 1.5 o 2 hrs lang (nakasulat "+h+")");
+  }
+  const exp=expectedAmt(e), a=e.amount===""||e.amount==null?null:+e.amount;
+  if(a===null) n.push("walang halaga"+(exp!==null?" (dapat "+exp+")":""));
+  else if(exp!==null&&a!==exp) n.push("halaga "+a+", dapat "+exp);
+  return n;
+}
+
+/* ---------- tables, row selection, undo ---------- */
+let view=[]; const sel=new Set(); let lastIdx=null;
+const undoStack=[], redoStack=[];
 function allEntries(){ const a=[]; photos.forEach(p=>(p.entries||[]).forEach((e,i)=>a.push({e,p,i}))); return a; }
 function sortView(){
   const a=allEntries().map((x,n)=>({...x,n}));
@@ -242,35 +286,80 @@ function sortView(){
   });
   view=a;
 }
-function cell(tr,text,bad,onEdit){
+const clone=o=>JSON.parse(JSON.stringify(o));
+function snap(){ return photos.map(p=>({id:p.id,rev:p.rev||0,entries:clone(p.entries||[])})); }
+function pushUndo(){ undoStack.push(snap()); if(undoStack.length>60) undoStack.shift(); redoStack.length=0; syncBtns(); }
+function restore(s){
+  s.forEach(x=>{ const p=photos.find(q=>q.id===x.id); if(p&&(p.rev||0)===x.rev){ p.entries=clone(x.entries); DB.put(p); } });
+  sel.clear(); render();
+}
+function undo(){ if(!undoStack.length) return; redoStack.push(snap()); restore(undoStack.pop()); syncBtns(); }
+function redo(){ if(!redoStack.length) return; undoStack.push(snap()); restore(redoStack.pop()); syncBtns(); }
+function syncBtns(){
+  $("undoBtn").disabled=!undoStack.length; $("redoBtn").disabled=!redoStack.length;
+  $("hlBtn").disabled=$("delBtn").disabled=!sel.size;
+  $("selInfo").textContent=sel.size?sel.size+" napili":"";
+}
+function delSel(){
+  if(!sel.size) return; pushUndo();
+  photos.forEach(p=>{ const k=(p.entries||[]).filter(e=>!sel.has(e)); if(k.length!==(p.entries||[]).length){ p.entries=k; DB.put(p); } });
+  sel.clear(); render();
+}
+function hlSel(){
+  if(!sel.size) return; pushUndo();
+  const all=[...sel].every(e=>e.hl); sel.forEach(e=>{ e.hl=!all; });
+  photos.forEach(p=>DB.put(p)); sel.clear(); render();
+}
+function toggleSel(idx,ev){
+  const v=view[idx];
+  if(ev&&ev.shiftKey&&lastIdx!=null){
+    for(let k=Math.min(lastIdx,idx);k<=Math.max(lastIdx,idx);k++) sel.add(view[k].e);
+  } else if(sel.has(v.e)) sel.delete(v.e); else sel.add(v.e);
+  lastIdx=idx; view.forEach(refresh); syncBtns();
+}
+function refresh(v){
+  const notes=validate(v.e), q=notes.length>0;
+  v.note.textContent=notes.join("; ");
+  [v.t1,v.t2].forEach(t=>{ t.classList.toggle("q",q); t.classList.toggle("hl",!!v.e.hl); t.classList.toggle("sel",sel.has(v.e)); });
+}
+function cell(tr,text,cls,onEdit){
   const td=document.createElement("td");
-  td.contentEditable="true"; td.textContent=text;
-  if(bad) td.className="bad";
-  td.oninput=()=>onEdit(td.textContent.trim(),false);
-  td.onblur=()=>onEdit(td.textContent.trim(),true);
+  td.contentEditable="true"; td.textContent=text; if(cls) td.className=cls;
+  td.oninput=()=>onEdit(td.textContent.trim(),false,td);
+  td.onblur=()=>onEdit(td.textContent.trim(),true,td);
   tr.appendChild(td); return td;
+}
+function ixCell(tr,idx){
+  const td=document.createElement("td"); td.className="ix nc"; td.textContent=idx+1; td.title="Pindutin para pumili";
+  td.onclick=ev=>toggleSel(idx,ev); tr.appendChild(td);
 }
 function render(){
   sortView();
   const b1=$("t1").tBodies[0], b2=$("t2").tBodies[0];
   b1.innerHTML=""; b2.innerHTML="";
-  view.forEach(({e,p})=>{
-    const t1=document.createElement("tr"), t2=document.createElement("tr");
-    cell(t1,showDate(e.date),!e.date,(v,done)=>{
+  view.forEach((v,idx)=>{
+    const {e,p}=v, t1=document.createElement("tr"), t2=document.createElement("tr");
+    v.t1=t1; v.t2=t2;
+    ixCell(t1,idx); ixCell(t2,idx);
+    cell(t1,showDate(e.date),"",(val,done)=>{
       if(!done) return;
-      const d=findDate(v); const iso=d?d.iso:(v===""?"":e.date);
+      const d=findDate(val), iso=d?d.iso:(val===""?"":e.date);
       if(iso!==e.date){ e.date=iso; DB.put(p); render(); }
     });
-    cell(t1,e.client,!e.client,(v)=>{e.client=v;DB.put(p)});
-    cell(t2,e.therapist,!e.therapist,(v)=>{e.therapist=v;DB.put(p)});
-    cell(t2,e.service,false,(v)=>{e.service=v;DB.put(p)});
-    cell(t2,e.hours,!e.hours,(v)=>{e.hours=v;DB.put(p)});
-    b1.appendChild(t1); b2.appendChild(t2);
+    cell(t1,e.client,"",val=>{ e.client=val; DB.put(p); refresh(v); });
+    cell(t2,e.therapist,"",val=>{ e.therapist=val; DB.put(p); refresh(v); });
+    cell(t2,e.service,"",val=>{ e.service=val; DB.put(p); refresh(v); });
+    cell(t2,e.hours,"",val=>{ e.hours=val; delete e.rawHours; DB.put(p); refresh(v); });
+    cell(t2,e.amount||"","nc",val=>{ e.amount=val.replace(/[^\d]/g,""); DB.put(p); refresh(v); });
+    const nt=document.createElement("td"); nt.className="nc note"; t2.appendChild(nt); v.note=nt;
+    b1.appendChild(t1); b2.appendChild(t2); refresh(v);
   });
-  $("count").textContent=view.length+" rows • "+photos.length+" pictures";
+  const flagged=view.filter(v=>validate(v.e).length).length;
+  $("count").textContent=view.length+" rows • "+flagged+" may tanong (pula) • "+photos.length+" pictures";
+  syncBtns();
 }
 function tableText(id){
-  return [...$(id).tBodies[0].rows].map(tr=>[...tr.cells].map(c=>c.textContent.trim()).join("\t")).join("\n");
+  return [...$(id).tBodies[0].rows].map(tr=>[...tr.cells].filter(c=>!/\b(nc|ix)\b/.test(c.className)).map(c=>c.textContent.trim()).join("\t")).join("\n");
 }
 async function copy(id,btn){
   const text=tableText(id);
@@ -314,7 +403,7 @@ async function pump(){
     try{
       setStatus("Binabasa ang picture "+(photos.indexOf(p)+1)+(queue.length?" ("+queue.length+" pa sa pila)":"")+"...");
       p.text=(await readImage(p.blob)).trim();
-      p.entries=parseText(p.text); p.status="done";
+      p.entries=parseText(p.text); p.status="done"; p.rev=(p.rev||0)+1;
     }catch(e){ p.status="error"; setStatus("Error: "+e.message); }
     DB.put(p); if(selId===p.id) $("raw").value=p.text;
     renderStrip(); render();
@@ -453,6 +542,7 @@ document.addEventListener("drop",e=>{
 });
 $("parse").onclick=()=>{
   const p=photos.find(x=>x.id===selId); if(!p) return;
+  p.rev=(p.rev||0)+1; pushUndo();
   p.text=$("raw").value; p.entries=parseText(p.text); p.status="done"; DB.put(p); renderStrip(); render();
 };
 $("reread").onclick=()=>{ const p=photos.find(x=>x.id===selId); if(!p) return; p.status="queued"; queue.push(p.id); renderStrip(); pump(); };
@@ -466,6 +556,16 @@ $("clearAll").onclick=()=>{
   if(!photos.length||!confirm("Burahin ang lahat ng pictures at table?")) return;
   photos=[]; selId=null; DB.clear(); renderStrip(); render(); setStatus("");
 };
+$("undoBtn").onclick=undo; $("redoBtn").onclick=redo; $("hlBtn").onclick=hlSel; $("delBtn").onclick=delSel;
+document.addEventListener("keydown",e=>{
+  const t=e.target;
+  if(t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;   // normal typing/undo inside a cell or box
+  const k=(e.key||"").toLowerCase(), mod=e.ctrlKey||e.metaKey;
+  if(mod&&k==="z"&&!e.shiftKey){ e.preventDefault(); undo(); }
+  else if(mod&&(k==="y"||(k==="z"&&e.shiftKey))){ e.preventDefault(); redo(); }
+  else if((e.key==="Delete"||e.key==="Backspace")&&sel.size){ e.preventDefault(); delSel(); }
+  else if(e.key==="Escape"&&sel.size){ sel.clear(); view.forEach(refresh); syncBtns(); }
+});
 $("copy1").onclick=e=>copy("t1",e.target);
 $("copy2").onclick=e=>copy("t2",e.target);
 $("engine").onchange=()=>{
