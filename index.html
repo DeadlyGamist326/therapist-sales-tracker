@@ -40,6 +40,7 @@ tr.hl td{background:var(--hlbg)}
 tr td.nw{background:var(--newbg)}
 tr.sel td{box-shadow:inset 0 2px 0 var(--acc),inset 0 -2px 0 var(--acc)}
 td.ix{width:34px;text-align:center;cursor:pointer;user-select:none;color:var(--mute);font-size:12px}
+td.sug{color:var(--acc);cursor:pointer;font-size:12.5px}
 td.note{color:var(--red);font-size:12.5px;min-width:150px}
 /* camera overlay */
 #cam{position:fixed;inset:0;background:#000;z-index:10;display:none;flex-direction:column}
@@ -96,7 +97,7 @@ td.note{color:var(--red);font-size:12.5px;min-width:150px}
 <div class="tables">
   <div class="card">
     <h2>Clients <button id="copy1">Copy</button></h2>
-    <div class="wrap"><table id="t1"><thead><tr><th class="nc">#</th><th>Date</th><th>Relationship / bago</th><th>Name</th></tr></thead><tbody></tbody></table></div>
+    <div class="wrap"><table id="t1"><thead><tr><th class="nc">#</th><th>Date</th><th>Relationship / bago</th><th>Name</th><th class="nc">Baka (pindutin)</th></tr></thead><tbody></tbody></table></div>
   </div>
   <div class="card">
     <h2>Therapist <button id="copy2">Copy</button></h2>
@@ -188,37 +189,46 @@ function normHours(s){
   if(isNaN(n)) return "";
   return String(Math.max(1,Math.round(n*2)/2));
 }
-function titleCase(s){ return s.replace(/\w\S*/g,w=>w[0].toUpperCase()+w.slice(1).toLowerCase()); }
+function titleCase(s){ return s.replace(/\w\S*/g,w=>/\d/.test(w)?w:w[0].toUpperCase()+w.slice(1).toLowerCase()); }
 /* ---------- names list (spelling check + relationships) ---------- */
 let LIST=[];   // {name, norm, src}  src 1 = this year, 2 = all years
 const REL=/\b(son|daughter|sister|brother|kapatid|husband|wife|mother|father|cousin|pinsan|friend|anak|asawa|mama|papa|mommy|daddy|tita|tito|lola|lolo|nanay|tatay|kuya|ate|nephew|niece|pamangkin|apo|girlfriend|boyfriend|colleague|officemate|neighbor|kapitbahay|yaya|driver)\b/gi;
 function norm(s){ return String(s).toLowerCase().replace(/\(.*?\)/g," ").replace(/[^a-z0-9À-ɏ]+/g," ").replace(/\s+/g," ").trim(); }
-function setList(items){            // items: [[name, src], ...]
+const ckey=x=>String(x).toLowerCase().replace(/\s+/g," ").trim();
+let byKey=new Map(), byNorm=new Map();
+function setList(items){            // items: [[name, src], ...]  (name kept EXACTLY as in the sheet)
   const seen=new Map();
   items.forEach(([name,src])=>{
-    const n=norm(name); if(!n) return;
-    const old=seen.get(n);
-    if(!old||src<old.src) seen.set(n,{name:String(name).trim(),norm:n,src});
+    const k=ckey(name); if(!k) return;
+    const old=seen.get(k);
+    if(!old||src<old.src) seen.set(k,{name:String(name),key:k,norm:norm(name),src});
   });
   LIST=[...seen.values()];
+  byKey=new Map(LIST.map(e=>[e.key,e])); byNorm=new Map();
+  LIST.forEach(e=>{ if(!e.norm) return; if(!byNorm.has(e.norm)) byNorm.set(e.norm,[]); byNorm.get(e.norm).push(e); });
   store.set("tst_list",JSON.stringify(LIST.map(e=>[e.name,e.src])));
   $("namesInfo").textContent=LIST.length+" names";
 }
+function numTokens(n){ return n.split(" ").filter(w=>/\d/.test(w)).join(" "); }
+/* STRICT: column 3 only gets a name that is in the list, written exactly as in the list.
+   A near match is never applied silently; it is offered as a suggestion (sug) instead. */
 function matchName(t){
-  if(!LIST.length) return {name:titleCase(t),isNew:false};   // no list loaded: nothing to compare with
-  const n=norm(t); if(!n) return {name:titleCase(t),isNew:true};
-  let best=null,bd=1e9;
+  if(!LIST.length) return {name:titleCase(t),isNew:false,sug:""};   // no list loaded: nothing to compare with
+  const hit=byKey.get(ckey(t));
+  if(hit) return {name:hit.name,isNew:false,sug:""};
+  const n=norm(t), arr=n?byNorm.get(n):null;
+  if(arr&&arr.length===1) return {name:arr[0].name,isNew:false,sug:""};   // same name, only punctuation/case differs
+  let best=null,bd=1e9; const nums=numTokens(n);
   for(const e of LIST){
+    if(numTokens(e.norm)!==nums) continue;                // unit numbers must be identical
     const d=lev(n,e.norm);
     if(d<bd||(d===bd&&e.src<best.src)){bd=d;best=e}
   }
-  const lim=Math.min(3,Math.floor(Math.max(n.length,best.norm.length)*0.2));
-  if(bd<=lim) return {name:best.name,isNew:false};
-  if(!n.includes(" ")){                                      // first name only, if exactly one in the list has it
-    const c=LIST.filter(e=>e.norm.split(" ")[0]===n);
-    if(c.length===1) return {name:c[0].name,isNew:false};
-  }
-  return {name:titleCase(t),isNew:true};
+  let sug="";
+  if(best&&bd<=Math.min(4,Math.floor(Math.max(n.length,best.norm.length)*0.25))) sug=best.name;
+  else if(arr&&arr.length) sug=arr[0].name;
+  else if(n&&!n.includes(" ")){ const c=LIST.filter(e=>e.norm.split(" ")[0]===n); if(c.length===1) sug=c[0].name; }
+  return {name:titleCase(t),isNew:true,sug};
 }
 // text of a client line -> {client (validated spelling), rel (Son, Sister...), isNew}
 function classify(raw){
@@ -229,7 +239,7 @@ function classify(raw){
   if(!t&&!rel) return null;
   if(!t) return {client:"",rel,isNew:false};
   const m=matchName(t);
-  return {client:m.name,rel,isNew:m.isNew};
+  return {client:m.name,rel,isNew:m.isNew,sug:m.sug||""};
 }
 const PAY=/\b(g\s?cash|gcash|cash|card|maya|paid|bank|transfer)\b/gi;
 const WEEKDAY=/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi;
@@ -237,7 +247,7 @@ const WEEKDAY=/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi
    (therapist, hours, payment, amount). The client is carried over to its therapist lines. */
 function parseText(text){
   const entries=[]; let cur="", cl=null, used=true;
-  const mk=(c,extra)=>({date:cur,client:c?c.client:"",rel:c?c.rel:"",isNew:c?!!c.isNew:false,therapist:"",service:"BM",hours:"",amount:"",...extra});
+  const mk=(c,extra)=>({date:cur,client:c?c.client:"",rel:c?c.rel:"",isNew:c?!!c.isNew:false,sug:c?(c.sug||""):"",therapist:"",service:"BM",hours:"",amount:"",...extra});
   const flush=()=>{ if(cl&&!used) entries.push(mk(cl)); };
   text.split(/\r?\n/).forEach(raw=>{
     let line=raw.replace(/[|_"“”]+/g," ").trim();
@@ -251,15 +261,19 @@ function parseText(text){
     let hs=false;
     line=line.replace(/\b(hot\s*stone|h\.?\s?s\.?)(?![a-z])/gi,()=>{hs=true;return " "});
     let hours="";
-    const hm=line.match(/(?:^|[\s(])(\d(?:[.,]\d)?)(?=$|[\s),;]|hrs?|h\b)/i);
+    let hm=line.match(/(?:^|[\s(])(\d(?:[.,]\d)?)(?=$|[\s),;]|hrs?|h\b)/i);
     if(hm) hours=normHours(hm[1]);
-    const rawHours=hm?hm[1].replace(",","."):"";
+    let rawHours=hm?hm[1].replace(",","."):"";
     let amount="";
     const am=(hm?line.replace(hm[0]," "):line).match(/(?:^|[\s₱])(\d{1,3}(?:,\d{3})+|\d{2,5})(?=$|[\s.,)])/);
     if(am) amount=am[1].replace(/,/g,"");
     let ther=null,therTok=null;
     const toks=line.split(/[\s,;:()\/\-]+/).filter(Boolean);
     for(const t of toks){ const e=THERAPISTS.find(n=>n.toLowerCase()===t.toLowerCase()); if(e){ther=e;therTok=t;break} }
+    // a lone digit after a name with no therapist on the line is a unit number, not hours ("Block 3")
+    if(!ther&&hm&&/^\d$/.test(hm[1])&&!new RegExp("(?:^|[\\s(])"+hm[1]+"\\s*(?:hrs?|h)\\b","i").test(line)
+       &&/[A-Za-z]{3,}/.test(line.replace(/[^A-Za-z]+/g," "))
+       &&!toks.some(t=>/^[A-Za-z]{3,}$/.test(t)&&matchTherapist(t))){ hm=null; hours=""; rawHours=""; amount=""; }
     // fuzzy (handwriting) only on lines that have hours, so a client like "Molly" is not turned into Dolly
     if(!ther&&hours!=="") for(let i=0;i<toks.length;i++){
       const t=toks[i];
@@ -398,9 +412,19 @@ function render(){
     });
     cell(t1,e.isNew?"":e.client,"",(val,done)=>{
       e.client=val;
-      if(done){ const m=LIST.length&&val?matchName(val):null; const nw=m?m.isNew:false; if(nw!==e.isNew){ e.isNew=nw; DB.put(p); render(); return; } }
+      if(done&&LIST.length&&val){                       // strict: only an exact list name stays in column 3
+        const m=matchName(val);
+        if(!m.isNew){ e.client=m.name; e.isNew=false; e.sug=""; DB.put(p); render(); return; }
+        e.client=m.name; e.isNew=true; e.sug=m.sug; DB.put(p); render(); return;
+      }
       DB.put(p); refresh(v);
     });
+    const sg=document.createElement("td"); sg.className="nc sug";
+    if(e.isNew&&e.sug){
+      sg.textContent="→ "+e.sug; sg.title="Pindutin para gamitin";
+      sg.onclick=()=>{ pushUndo(); e.client=e.sug; e.isNew=false; e.sug=""; DB.put(p); render(); };
+    }
+    t1.appendChild(sg);
     cell(t2,e.therapist,"",val=>{ e.therapist=val; DB.put(p); refresh(v); });
     cell(t2,e.service,"",val=>{ e.service=val; DB.put(p); refresh(v); });
     cell(t2,e.hours,"",val=>{ e.hours=val; delete e.rawHours; DB.put(p); refresh(v); });
@@ -676,7 +700,7 @@ $("names").onchange=async e=>{
         const ws=wb.Sheets[sn], rg=XLSX.utils.decode_range(ws["!ref"]||"A1");
         for(let r=rg.s.r;r<=rg.e.r;r++){
           const c=ws[XLSX.utils.encode_cell({r,c:1})];
-          if(c&&c.v!=null&&String(c.v).trim()) items.push([String(c.v).trim(),idx===0?1:2]);
+          if(c&&c.v!=null&&String(c.v).trim()) items.push([String(c.v),idx===0?1:2]);
         }
       });
     } else {
